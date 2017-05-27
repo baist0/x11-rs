@@ -31,6 +31,7 @@ pub mod xmu;
 pub mod xrandr;
 pub mod xrecord;
 pub mod xrender;
+pub mod xshm;
 pub mod xss;
 pub mod xt;
 pub mod xtest;
