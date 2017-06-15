@@ -24,7 +24,7 @@ impl DemoWindow
 		use std::os::raw::{c_char,c_int,c_uint};
 		unsafe
 		{
-			let mut attributes: xlib::XSetWindowAttributes = mem::uninitialized();
+			let mut attributes: xlib::XSetWindowAttributes = mem::zeroed();
 	
 			let window = xlib::XCreateWindow(display, root, 0, 0, width, height,
 				0, 24, xlib::InputOutput as c_uint, null_mut(),
@@ -74,7 +74,7 @@ impl DemoWindow
 		unsafe
 		{
 			// Event loop
-			let mut event: xlib::XEvent = mem::uninitialized();
+			let mut event: xlib::XEvent = mem::zeroed();
 			if(xlib::XCheckWindowEvent(self.display, self.window,
 				xlib::KeyPressMask, &mut event) != 0) {
 				while xlib::XCheckWindowEvent(self.display, self.window, 
@@ -97,7 +97,7 @@ impl Drop for DemoWindow
 
 struct Demo
 {
-	xshm_segment_info: xshm::XShmSegmentInfo,
+	xshm_segment_info: Box<xshm::XShmSegmentInfo>,
 	display: *mut xlib::Display,
 	demo_window: DemoWindow,
 	gc: xlib::GC,
@@ -108,7 +108,7 @@ struct Demo
 
 impl Demo
 {
-	fn create_xshm_sgmnt_inf(size: usize) -> Result<xshm::XShmSegmentInfo, u8>
+	fn create_xshm_sgmnt_inf(size: usize) -> Result<Box<xshm::XShmSegmentInfo>, u8>
 	{
 		use std::os::raw::{c_char};
 		use posix::*;
@@ -125,24 +125,24 @@ impl Demo
 		}
 		let mut shmidds = shmid_ds::new();
 		shmctl(shmid, IPC_RMID, &mut shmidds);
-		Ok(XShmSegmentInfo {shmseg: 0, shmid, 
-			shmaddr: (shmaddr as *mut c_char), readOnly: 0})
+		Ok(Box::new(XShmSegmentInfo {shmseg: 0, shmid, 
+			shmaddr: (shmaddr as *mut c_char), readOnly: 0}))
 	}
 	
-	fn destroy_xshm_sgmnt_inf(seginf: xshm::XShmSegmentInfo)
+	fn destroy_xshm_sgmnt_inf(seginf: &mut Box<xshm::XShmSegmentInfo>)
 	{
 		shm::shmdt(seginf.shmaddr as *mut posix::void_t);
 	}
 	
 	fn create_xshm_image(dspl: *mut xlib::Display, vsl: *mut xlib::Visual, 
-			xshminfo: &mut xshm::XShmSegmentInfo,
+			xshminfo: &mut Box<xshm::XShmSegmentInfo>,
 			width: u32, height: u32, depth: u32) -> Result<*mut xlib::XImage, u8>
 	{
 		unsafe
 		{
 			let ximg = xshm::XShmCreateImage(dspl, vsl, depth,
-				xlib::ZPixmap, null_mut(),
-				xshminfo as *mut xshm::XShmSegmentInfo, width, height);
+				xlib::ZPixmap, null_mut(), 
+				xshminfo.as_mut() as *mut _, width, height);
 			if ximg == null_mut() {
 				return Err(1);
 			}
@@ -176,7 +176,7 @@ impl Demo
 			let grph_cntx = xlib::XCreateGC(dspl, demo_wnd.window, 0, null_mut());
 			let ximg = Self::create_xshm_image(dspl, vsl, 
 				&mut xshminfo, w, h, 24).unwrap();
-			xshm::XShmAttach(dspl, &mut xshminfo);
+			xshm::XShmAttach(dspl, xshminfo.as_mut() as *mut _);
 			xlib::XSync(dspl, xlib::False);
 			Demo
 			{
@@ -202,9 +202,8 @@ impl Demo
 		unsafe
 		{
 			self.demo_window.show();
-			// Without xgcvls and grph_cntx it doesn't work!
-			let mut xgcvls: xlib::XGCValues = mem::uninitialized();
-			let grph_cntx = xlib::XCreateGC(self.display, self.demo_window.window, 0, null_mut());
+			let grph_cntx = xlib::XCreateGC(self.display,
+				self.demo_window.window, 0, null_mut());
 			let mut rng = rand::thread_rng();
 			let put_pixel = (*self.image).funcs.put_pixel.unwrap();
 			// Main loop
@@ -225,11 +224,11 @@ impl Demo
 	{
 		unsafe
 		{ 
-			xshm::XShmDetach(self.display, &mut self.xshm_segment_info);
+			xshm::XShmDetach(self.display, self.xshm_segment_info.as_mut() as *mut _);
 			Self::destroy_xshm_image(self.image);
 			xlib::XCloseDisplay(self.display);
 		}
-		Self::destroy_xshm_sgmnt_inf(self.xshm_segment_info);
+		Self::destroy_xshm_sgmnt_inf(&mut self.xshm_segment_info);
 	}
 }
 
