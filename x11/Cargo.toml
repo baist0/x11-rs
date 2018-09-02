@@ -38,9 +38,6 @@ libc = "0.2"
 
 [dev-dependencies]
 rand = "0.3"
-# using https://github.com/mahkoh/posix.rs instead posix = "0.0.2"
-# need to adapt posix.rs for newest version of rustc
-posix = {path = "./../../posix.rs"}
 
 [build-dependencies]
 pkg-config = "0.3.8"
