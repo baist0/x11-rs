@@ -10,7 +10,9 @@ use x11::xshm;
 pub struct DemoWindow
 {
     display: *mut xlib::Display,
-    pub window: xlib::Window
+    pub win_id: xlib::Window,
+    wm_protocols: xlib::Atom,
+    wm_delete_window: xlib::Atom
 }
 
 impl DemoWindow
@@ -24,19 +26,17 @@ impl DemoWindow
         {
             let mut attributes: xlib::XSetWindowAttributes = mem::zeroed();
     
-            let window = xlib::XCreateWindow(display, root, 0, 0, width, height,
+            let win_id = xlib::XCreateWindow(display, root, 0, 0, width, height,
                 0, 24, xlib::InputOutput as c_uint, null_mut(),
                 xlib::CWOverrideRedirect | xlib::CWBackPixel | xlib::CWBorderPixel, 
                 &mut attributes);
     
             // Set window title.
-            let title_str = CString::new("hello-world").unwrap();
-            xlib::XStoreName(display, window, title_str.as_ptr() as *mut c_char);
-    
+            let title_str = CString::new("XSHM Example").unwrap();
+            xlib::XStoreName(display, win_id, title_str.as_ptr() as *mut c_char);
             // Hook close requests.
             let wm_protocols_str = CString::new("WM_PROTOCOLS").unwrap();
             let wm_delete_window_str = CString::new("WM_DELETE_WINDOW").unwrap();
-    
             let wm_protocols = xlib::XInternAtom(display, 
                 wm_protocols_str.as_ptr(), xlib::False);
             let wm_delete_window = xlib::XInternAtom(display, 
@@ -44,17 +44,19 @@ impl DemoWindow
     
             let mut protocols = [wm_delete_window];
     
-            xlib::XSetWMProtocols(display, window, 
+            xlib::XSetWMProtocols(display, win_id, 
                 protocols.as_mut_ptr(), protocols.len() as c_int);
                 
-            xlib::XSelectInput(display, window, 
+            xlib::XSelectInput(display, win_id, 
                 xlib::ExposureMask | xlib::KeyPressMask |
                 xlib::ButtonPressMask | xlib::StructureNotifyMask);
                 
             DemoWindow
             {
                 display: display,
-                window: window
+                win_id: win_id,
+                wm_protocols: wm_protocols,
+                wm_delete_window: wm_delete_window
             }
         }
     }
@@ -63,7 +65,7 @@ impl DemoWindow
         unsafe
         {
             // Show window.
-            xlib::XMapWindow(self.display, self.window);
+            xlib::XMapWindow(self.display, self.win_id);
         }
     }
     
@@ -73,12 +75,22 @@ impl DemoWindow
         {
             // Event loop
             let mut event: xlib::XEvent = mem::zeroed();
-            if xlib::XCheckWindowEvent(self.display, self.window,
-                xlib::KeyPressMask, &mut event) != 0 {
-                while xlib::XCheckWindowEvent(self.display, self.window, 
-                    xlib::KeyPressMask, &mut event) != 0 {
+
+            if xlib::XCheckTypedWindowEvent(self.display, self.win_id,
+                xlib::ClientMessage as _, &mut event) != 0 {
+                if event.type_ == xlib::ClientMessage
+                    && event.client_message.message_type as xlib::Atom == self.wm_protocols
+                    && event.client_message.data.get_long(0) as xlib::Atom == self.wm_delete_window
+                {
+                    return false;
                 }
-                return false;
+            }
+
+            if xlib::XCheckWindowEvent(self.display, self.win_id,
+                xlib::KeyPressMask, &mut event) != 0 {
+                if event.type_ == xlib::KeyPress {
+                    return false;
+                }
             }
         }
         return true;
@@ -89,7 +101,7 @@ impl Drop for DemoWindow
 {
     fn drop(&mut self)
     {
-        unsafe { xlib::XDestroyWindow(self.display, self.window);   }
+        unsafe { xlib::XDestroyWindow(self.display, self.win_id); }
     }
 }
 
@@ -171,7 +183,7 @@ impl Demo
             let root_wnd = xlib::XRootWindow(dspl, screen_num);
             let vsl = xlib::XDefaultVisual(dspl, screen_num);
             let mut demo_wnd = DemoWindow::new(dspl, root_wnd, w, h);
-            let grph_cntx = xlib::XCreateGC(dspl, demo_wnd.window, 0, null_mut());
+            let grph_cntx = xlib::XCreateGC(dspl, demo_wnd.win_id, 0, null_mut());
             let ximg = Self::create_xshm_image(dspl, vsl, 
                 &mut xshminfo, w, h, 24).unwrap();
             xshm::XShmAttach(dspl, xshminfo.as_mut() as *mut _);
@@ -200,8 +212,6 @@ impl Demo
         unsafe
         {
             self.demo_window.show();
-            let grph_cntx = xlib::XCreateGC(self.display,
-                self.demo_window.window, 0, null_mut());
             let mut rng = rand::thread_rng();
             let put_pixel = (*self.image).funcs.put_pixel.unwrap();
             // Main loop
@@ -210,7 +220,7 @@ impl Demo
                 let y = rng.gen_range(0, self.height - 1) as c_int;
                 let c = rng.gen_range(0, 0x00FFFFFF) as c_ulong;
                 put_pixel(self.image, x, y, c);
-                xshm::XShmPutImage(self.display, self.demo_window.window, 
+                xshm::XShmPutImage(self.display, self.demo_window.win_id, 
                     self.gc, self.image, 0, 0, 0, 0, self.width, self.height,
                     xlib::False);
                 xlib::XSync(self.display, xlib::False);
@@ -232,7 +242,7 @@ impl Demo
 
 fn main()
 {
-    let mut demo = Demo::new(640, 480);
+    let mut demo = Demo::new(800, 600);
     demo.start();
     demo.execute();
     demo.stop();
